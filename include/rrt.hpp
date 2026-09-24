@@ -10,6 +10,7 @@
 struct Node {
     Point2D point;
     int parent;
+    int iteration;  // iteration that added this node (0 = start), for replaying growth
 };
 
 struct PlanResult {

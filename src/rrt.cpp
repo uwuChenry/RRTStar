@@ -21,7 +21,7 @@ PlanResult RRT::generatePath(const Pose2D& startPose, const Pose2D& goalPose) {
     PlanResult result;
     goal = goalPose.point;
     tree.clear();
-    tree.push_back({startPose.point, -1});
+    tree.push_back({startPose.point, -1, 0});
 
     if (searchSpace.checkPointCollision(startPose.point) || searchSpace.checkPointCollision(goal)) {
         result.iterations = -1;
@@ -37,13 +37,13 @@ PlanResult RRT::generatePath(const Pose2D& startPose, const Pose2D& goalPose) {
             continue;
         }
 
-        tree.push_back({*newPoint, nearest});
+        tree.push_back({*newPoint, nearest, i + 1});
         int newIndex = static_cast<int>(tree.size()) - 1;
 
         // Close enough to the goal with a clear line of sight: connect and finish.
         if (newPoint->distanceTo(goal) <= stepSize &&
             !searchSpace.checkLineCollision(Line(*newPoint, goal))) {
-            tree.push_back({goal, newIndex});
+            tree.push_back({goal, newIndex, i + 1});
             result.success = true;
             result.iterations = i + 1;
             result.path = retrace(static_cast<int>(tree.size()) - 1);

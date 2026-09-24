@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>RRT Animation</title>
+<style>
+  body { font-family: sans-serif; background: #fafafa; color: #111; display: flex; flex-direction: column; align-items: center; margin: 16px; }
+  h2 { margin: 4px 0 10px; font-weight: 600; }
+  svg { background: white; border: 1px solid #333; max-width: 100%; height: auto; }
+  .controls { display: flex; gap: 10px; align-items: center; margin-top: 10px; flex-wrap: wrap; justify-content: center; }
+  input[type=range]#scrub { width: min(500px, 80vw); }
+  button { padding: 4px 14px; font-size: 15px; }
+</style></head><body>
+<h2 id="title"></h2>
+<svg id="canvas" width="600" height="600" viewBox="0 0 600 600">
+<circle cx="300" cy="300" r="195" fill="black"/>
+<rect x="50" y="100" width="150" height="50" fill="black"/>
+<g id="tree" stroke="red" stroke-width="1"></g>
+<polyline id="path" fill="none" stroke="limegreen" stroke-width="4" points="" />
+<circle id="sample" r="4" fill="none" stroke="gray" visibility="hidden" />
+<circle cx="100" cy="300" r="8" fill="blue"/>
+<circle cx="500" cy="300" r="8" fill="gold" stroke="black"/>
+</svg>
+<div class="controls">
+  <button id="play">Pause</button>
+  <input id="scrub" type="range" min="0" value="0">
+  <label>Speed <input id="speed" type="range" min="5" max="600" value="60"></label>
+  <span id="speedLabel">60 it/s</span>
+</div>
+<script>
+const NODES = [[100,300,-1,0],[100.703,275.01,0,3],[97.9981,250.157,1,5],[116.624,233.481,2,15],[115.716,208.498,3,16],[100.624,324.992,0,21],[97.6987,349.821,5,22],[95.5826,374.731,6,26],[119.854,380.724,7,27],[83.2962,396.503,7,29],[67.5602,415.93,9,33],[123.287,184.672,4,36],[145.111,172.477,11,38],[108.861,164.253,11,58],[84.2693,159.756,13,62],[98.1358,416.623,9,69],[49.1605,399.005,10,70],[66.4377,177.278,14,72],[165.733,158.343,12,78],[57.1331,438.651,10,79],[74.0586,341.688,6,80],[94.5427,303.084,0,89],[117.001,433.027,15,91],[133.53,451.783,22,93],[70.9037,185.085,17,94],[148.221,171.177,12,95],[111.825,464.189,23,105],[108.337,488.944,26,106],[150.962,469.704,23,108],[103.4,513.452,27,110],[95.1999,537.069,29,111],[66.1004,365.387,20,117],[71.4534,529.252,30,118],[75.7127,275.71,1,120],[175.12,476.137,28,121],[199.974,473.44,34,126],[200.434,484.791,35,128],[65.9457,390.813,9,130],[224.748,490.607,36,132],[205.579,505.275,36,133],[249.745,490.991,38,139],[168.526,500.252,34,140],[42.8623,356.168,31,142],[273.947,497.255,40,150],[298.911,495.907,43,164],[323.901,495.189,44,165],[42.8062,169.121,17,167],[97.1882,296.153,0,169],[348.716,492.153,45,171],[90.0407,337.796,6,173],[88.3896,375.75,7,174],[36.3913,452.608,19,175],[372.451,484.301,48,177],[79.6195,233.209,2,183],[395.165,473.858,52,188],[49.8088,541.762,32,193],[418.534,464.976,54,194],[439.057,479.253,56,196],[322.617,520.156,45,202],[88.4095,458.825,26,204],[431.154,502.971,57,208],[318.282,544.777,58,209],[51.2443,566.721,55,210],[335.837,495.089,45,211],[102.807,386.699,7,212],[463.106,486.082,57,213],[90.0205,341.198,49,214],[22.6285,341.485,42,216],[478.553,466.425,65,217],[481.748,441.63,68,219],[50.9943,416.068,10,221],[494.574,420.171,69,222],[68.6095,457.714,59,223],[495.911,395.207,71,224],[486.617,371.998,73,225],[501.325,445.337,69,227],[510.157,363.58,74,230],[109.507,443.52,22,232],[199.257,529.462,39,234],[506.213,338.893,76,235],[473.449,453.842,68,236],[56.2512,242.093,53,237],[107.297,423.663,15,239],[444.987,523.795,60,240],[210.82,540.059,78,242],[468.056,533.43,83,248],[502.27,314.206,79,249],[500,300,86,249]];
+const PATH = [[100,300],[100.624,324.992],[97.6987,349.821],[95.5826,374.731],[83.2962,396.503],[98.1358,416.623],[117.001,433.027],[133.53,451.783],[150.962,469.704],[175.12,476.137],[199.974,473.44],[200.434,484.791],[224.748,490.607],[249.745,490.991],[273.947,497.255],[298.911,495.907],[323.901,495.189],[348.716,492.153],[372.451,484.301],[395.165,473.858],[418.534,464.976],[439.057,479.253],[463.106,486.082],[478.553,466.425],[481.748,441.63],[494.574,420.171],[495.911,395.207],[486.617,371.998],[510.157,363.58],[506.213,338.893],[502.27,314.206],[500,300]];
+const TOTAL_ITER = 249;
+const TITLE = "RRT";
+
+const SVGNS = "http://www.w3.org/2000/svg";
+const treeG = document.getElementById("tree");
+const pathEl = document.getElementById("path");
+const sampleEl = document.getElementById("sample");
+const titleEl = document.getElementById("title");
+const scrub = document.getElementById("scrub");
+const playBtn = document.getElementById("play");
+const speedEl = document.getElementById("speed");
+scrub.max = TOTAL_ITER;
+
+let shown = 1;        // number of nodes currently drawn (node 0 = start)
+let iter = 0;
+let playing = true;
+let last = 0;
+
+function addEdge(i) {
+  const [x, y, p] = NODES[i];
+  if (p < 0) return;
+  const l = document.createElementNS(SVGNS, "line");
+  l.setAttribute("x1", x); l.setAttribute("y1", y);
+  l.setAttribute("x2", NODES[p][0]); l.setAttribute("y2", NODES[p][1]);
+  treeG.appendChild(l);
+}
+
+function setIteration(target) {
+  target = Math.max(0, Math.min(TOTAL_ITER, target));
+  if (target < iter) { treeG.replaceChildren(); shown = 1; }
+  iter = target;
+  let newest = -1;
+  while (shown < NODES.length && NODES[shown][3] <= iter) { addEdge(shown); newest = shown; shown++; }
+  if (newest >= 0) {
+    sampleEl.setAttribute("cx", NODES[newest][0]); sampleEl.setAttribute("cy", NODES[newest][1]);
+    sampleEl.setAttribute("visibility", "visible");
+  }
+  const done = iter >= TOTAL_ITER;
+  pathEl.setAttribute("points", done ? PATH.map(p => p.join(",")).join(" ") : "");
+  if (done) sampleEl.setAttribute("visibility", "hidden");
+  titleEl.textContent = done
+    ? `${TITLE} - Complete (${TOTAL_ITER} iterations, ${NODES.length} nodes${PATH.length ? "" : ", no path found"})`
+    : `${TITLE} - Iteration ${iter}`;
+  scrub.value = iter;
+}
+
+function frame(t) {
+  const perSecond = Number(speedEl.value);
+  if (playing && t - last >= 1000 / Math.min(perSecond, 60)) {
+    const step = Math.max(1, Math.round(perSecond / 60));
+    last = t;
+    setIteration(iter + step);
+    if (iter >= TOTAL_ITER) { playing = false; playBtn.textContent = "Replay"; }
+  }
+  requestAnimationFrame(frame);
+}
+
+playBtn.onclick = () => {
+  if (iter >= TOTAL_ITER) { setIteration(0); playing = true; }
+  else playing = !playing;
+  playBtn.textContent = playing ? "Pause" : "Play";
+};
+scrub.oninput = () => { playing = false; playBtn.textContent = "Play"; setIteration(Number(scrub.value)); };
+speedEl.oninput = () => { document.getElementById("speedLabel").textContent = speedEl.value + " it/s"; };
+
+setIteration(0);
+requestAnimationFrame(frame);
+</script>
+</body></html>

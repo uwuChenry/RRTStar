@@ -1,6 +1,7 @@
 #include <iostream>
 #include <memory>
 #include "circle.hpp"
+#include "html_animation.hpp"
 #include "rectangle.hpp"
 #include "rrt.hpp"
 #include "search_space.hpp"
@@ -38,6 +39,10 @@ int main() {
 
     if (writeSvg("rrt.svg", space, rrt.getTree(), result.path, start, goal)) {
         std::cout << "Wrote rrt.svg" << std::endl;
+    }
+    if (writeAnimation("rrt_animation.html", space, rrt.getTree(), result.path, start, goal,
+                       result.iterations)) {
+        std::cout << "Wrote rrt_animation.html (open in a browser)" << std::endl;
     }
     return result.success ? 0 : 1;
 }
