@@ -3,31 +3,18 @@
 #include <optional>
 #include <random>
 #include <vector>
+#include "motion_planner.hpp"
 #include "point2d.hpp"
 #include "search_space.hpp"
 
-// Tree node. Parents are stored as indices into the node list (-1 = root).
-struct Node {
-    Point2D point;
-    int parent;
-    int iteration;  // iteration that added this node (0 = start), for replaying growth
-};
-
-struct PlanResult {
-    bool success = false;
-    int iterations = 0;          // -1 if start/goal is in collision
-    double timeSeconds = 0.0;
-    std::vector<Point2D> path;   // start -> goal, empty on failure
-
-    double pathLength() const {
-        double len = 0.0;
-        for (size_t i = 1; i < path.size(); ++i) len += path[i - 1].distanceTo(path[i]);
-        return len;
-    }
-};
-
-class RRT {
+class RRT : public MotionPlanner {
 private:
+    // Tree node. Parents are stored as indices into the node list (-1 = root).
+    struct Node {
+        Point2D point;
+        int parent;
+    };
+
     const SearchSpace& searchSpace;
     double goalSampleRate;
     double stepSize;
@@ -46,8 +33,6 @@ public:
     RRT(const SearchSpace& searchSpace, double goalSampleRate = 0.1, double stepSize = 1.0,
         int maxIterations = 10000, unsigned int seed = std::random_device{}());
 
-    PlanResult generatePath(const Pose2D& start, const Pose2D& goal);
-
-    // The tree from the most recent call to generatePath (for visualization).
-    const std::vector<Node>& getTree() const { return tree; }
+    PlanResult generatePath(const Pose2D& start, const Pose2D& goal) override;
+    std::string name() const override { return "RRT"; }
 };

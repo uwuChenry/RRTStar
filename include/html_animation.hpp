@@ -2,18 +2,16 @@
 
 #include <fstream>
 #include <string>
-#include <vector>
+#include "motion_planner.hpp"
 #include "point2d.hpp"
-#include "rrt.hpp"
 #include "search_space.hpp"
 
-// Writes a self-contained HTML page that replays the RRT tree growing,
-// iteration by iteration (like the matplotlib animation in the Python version).
-// Open the file in a browser: play/pause, change speed, or drag the slider.
+// Writes a self-contained HTML page that replays the tree growing, iteration by
+// iteration (like the matplotlib animation in the Python version), including
+// RRT* rewires and the best path improving. Open the file in a browser.
 inline bool writeAnimation(const std::string& filename, const SearchSpace& space,
-                           const std::vector<Node>& tree, const std::vector<Point2D>& path,
-                           const Pose2D& start, const Pose2D& goal, int totalIterations,
-                           const std::string& title = "RRT", double scale = 50.0) {
+                           const TreeHistory& history, const Pose2D& start, const Pose2D& goal,
+                           const std::string& title, double scale = 50.0) {
     std::ofstream out(filename);
     if (!out) return false;
 
@@ -30,6 +28,7 @@ inline bool writeAnimation(const std::string& filename, const SearchSpace& space
   .controls { display: flex; gap: 10px; align-items: center; margin-top: 10px; flex-wrap: wrap; justify-content: center; }
   input[type=range]#scrub { width: min(500px, 80vw); }
   button { padding: 4px 14px; font-size: 15px; }
+  #rewired line { stroke: dodgerblue; stroke-width: 2; }
 </style></head><body>
 <h2 id="title"></h2>
 <svg id="canvas" width=")" << space.getWidth() * scale << "\" height=\"" << h * scale
@@ -39,8 +38,9 @@ inline bool writeAnimation(const std::string& filename, const SearchSpace& space
         out << obstacle->toSvg(scale, h) << "\n";
     }
     out << R"(<g id="tree" stroke="red" stroke-width="1"></g>
+<g id="rewired"></g>
 <polyline id="path" fill="none" stroke="limegreen" stroke-width="4" points="" />
-<circle id="sample" r="4" fill="none" stroke="gray" visibility="hidden" />
+<circle id="newest" r="4" fill="none" stroke="gray" visibility="hidden" />
 )";
     out << "<circle cx=\"" << sx(start.point) << "\" cy=\"" << sy(start.point)
         << "\" r=\"8\" fill=\"blue\"/>\n";
@@ -55,62 +55,112 @@ inline bool writeAnimation(const std::string& filename, const SearchSpace& space
 </div>
 )";
 
-    // Data: nodes as [x, y, parentIndex, iteration], in insertion order.
-    out << "<script>\nconst NODES = [";
-    for (size_t i = 0; i < tree.size(); ++i) {
+    // Data: node positions (SVG coords) and events as [iteration, node, parent].
+    out << "<script>\nconst POINTS = [";
+    for (size_t i = 0; i < history.points.size(); ++i) {
         if (i) out << ",";
-        out << "[" << sx(tree[i].point) << "," << sy(tree[i].point) << ","
-            << tree[i].parent << "," << tree[i].iteration << "]";
+        out << "[" << sx(history.points[i]) << "," << sy(history.points[i]) << "]";
     }
-    out << "];\nconst PATH = [";
-    for (size_t i = 0; i < path.size(); ++i) {
+    out << "];\nconst EVENTS = [";
+    for (size_t i = 0; i < history.events.size(); ++i) {
+        const auto& e = history.events[i];
         if (i) out << ",";
-        out << "[" << sx(path[i]) << "," << sy(path[i]) << "]";
+        out << "[" << e.iteration << "," << e.node << "," << e.parent << "]";
     }
-    out << "];\nconst TOTAL_ITER = " << totalIterations << ";\n";
+    out << "];\nconst GOAL = " << history.goalIndex << ";\n";
+    out << "const TOTAL_ITER = " << history.totalIterations << ";\n";
+    out << "const SCALE = " << scale << ";\n";
     out << "const TITLE = \"" << title << "\";\n";
 
     out << R"(
 const SVGNS = "http://www.w3.org/2000/svg";
 const treeG = document.getElementById("tree");
+const rewiredG = document.getElementById("rewired");
 const pathEl = document.getElementById("path");
-const sampleEl = document.getElementById("sample");
+const newestEl = document.getElementById("newest");
 const titleEl = document.getElementById("title");
 const scrub = document.getElementById("scrub");
 const playBtn = document.getElementById("play");
 const speedEl = document.getElementById("speed");
 scrub.max = TOTAL_ITER;
 
-let shown = 1;        // number of nodes currently drawn (node 0 = start)
+let parent = [];   // current parent of each node (undefined = not added yet)
+let lines = [];    // SVG line per node, to its parent
+let applied = 0;   // number of EVENTS applied
 let iter = 0;
+let rewires = 0;
+let firstCost = null;
 let playing = true;
 let last = 0;
 
-function addEdge(i) {
-  const [x, y, p] = NODES[i];
-  if (p < 0) return;
-  const l = document.createElementNS(SVGNS, "line");
-  l.setAttribute("x1", x); l.setAttribute("y1", y);
-  l.setAttribute("x2", NODES[p][0]); l.setAttribute("y2", NODES[p][1]);
-  treeG.appendChild(l);
+function setLine(l, a, b) {
+  l.setAttribute("x1", POINTS[a][0]); l.setAttribute("y1", POINTS[a][1]);
+  l.setAttribute("x2", POINTS[b][0]); l.setAttribute("y2", POINTS[b][1]);
+}
+
+function reset() {
+  treeG.replaceChildren(); rewiredG.replaceChildren();
+  parent = []; lines = []; applied = 0; iter = 0; rewires = 0; firstCost = null;
+}
+
+function currentPath() {
+  if (GOAL < 0 || parent[GOAL] === undefined) return null;
+  const pts = [];
+  for (let n = GOAL; n !== -1; n = parent[n]) pts.push(POINTS[n]);
+  return pts.reverse();
+}
+
+function pathCost(pts) {
+  let c = 0;
+  for (let i = 1; i < pts.length; i++) c += Math.hypot(pts[i][0] - pts[i-1][0], pts[i][1] - pts[i-1][1]);
+  return c / SCALE;
 }
 
 function setIteration(target) {
   target = Math.max(0, Math.min(TOTAL_ITER, target));
-  if (target < iter) { treeG.replaceChildren(); shown = 1; }
+  if (target < iter) reset();
   iter = target;
+  rewiredG.replaceChildren();  // highlight only the latest step's rewires
   let newest = -1;
-  while (shown < NODES.length && NODES[shown][3] <= iter) { addEdge(shown); newest = shown; shown++; }
-  if (newest >= 0) {
-    sampleEl.setAttribute("cx", NODES[newest][0]); sampleEl.setAttribute("cy", NODES[newest][1]);
-    sampleEl.setAttribute("visibility", "visible");
+  while (applied < EVENTS.length && EVENTS[applied][0] <= iter) {
+    const [it, n, p] = EVENTS[applied++];
+    const isNew = parent[n] === undefined;
+    parent[n] = p;
+    if (p < 0) continue;
+    if (isNew) {
+      lines[n] = document.createElementNS(SVGNS, "line");
+      treeG.appendChild(lines[n]);
+      newest = n;
+    } else {
+      rewires++;
+      if (it === iter) {
+        const hl = document.createElementNS(SVGNS, "line");
+        setLine(hl, n, p);
+        rewiredG.appendChild(hl);
+      }
+    }
+    setLine(lines[n], n, p);
   }
+  if (newest >= 0) {
+    newestEl.setAttribute("cx", POINTS[newest][0]); newestEl.setAttribute("cy", POINTS[newest][1]);
+    newestEl.setAttribute("visibility", "visible");
+  }
+
+  const pts = currentPath();
+  pathEl.setAttribute("points", pts ? pts.map(p => p.join(",")).join(" ") : "");
+  let costText = "";
+  if (pts) {
+    const c = pathCost(pts);
+    if (firstCost === null) firstCost = c;
+    costText = `, path cost ${c.toFixed(2)}` + (c < firstCost - 1e-9 ? ` (first ${firstCost.toFixed(2)})` : "");
+  }
+
   const done = iter >= TOTAL_ITER;
-  pathEl.setAttribute("points", done ? PATH.map(p => p.join(",")).join(" ") : "");
-  if (done) sampleEl.setAttribute("visibility", "hidden");
-  titleEl.textContent = done
-    ? `${TITLE} - Complete (${TOTAL_ITER} iterations, ${NODES.length} nodes${PATH.length ? "" : ", no path found"})`
-    : `${TITLE} - Iteration ${iter}`;
+  if (done) { newestEl.setAttribute("visibility", "hidden"); rewiredG.replaceChildren(); }
+  const nodes = parent.filter(p => p !== undefined).length;
+  titleEl.textContent = (done ? `${TITLE} - Complete (${TOTAL_ITER} iterations` : `${TITLE} - Iteration ${iter} (`)
+    + `${done ? ", " : ""}${nodes} nodes, ${rewires} rewires${costText}`
+    + `${done && !pts ? ", no path found" : ""})`;
   scrub.value = iter;
 }
 
@@ -136,7 +186,7 @@ speedEl.oninput = () => { document.getElementById("speedLabel").textContent = sp
 setIteration(0);
 requestAnimationFrame(frame);
 </script>
+</body></html>
 )";
-    out << "</body></html>\n";
     return true;
 }

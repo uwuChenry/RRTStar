@@ -1,17 +1,2 @@
 # Auto detect text files and perform LF normalization
 * text=auto
-
-
-/build/
-CMakeCache.txt
-CMakeFiles/
-Makefile
-*.o
-*.exe
-*.out
-*.a
-*.so
-
-# Ignore all files in the build directory
-/build/*
-```

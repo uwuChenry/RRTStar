@@ -3,14 +3,14 @@
 #include <fstream>
 #include <string>
 #include <vector>
+#include "motion_planner.hpp"
 #include "point2d.hpp"
-#include "rrt.hpp"
 #include "search_space.hpp"
 
-// Writes the field, obstacles, RRT tree and final path to an SVG file
+// Writes the field, obstacles, final tree and path to an SVG file
 // (open it in any browser). Replaces the matplotlib drawing in the Python version.
 inline bool writeSvg(const std::string& filename, const SearchSpace& space,
-                     const std::vector<Node>& tree, const std::vector<Point2D>& path,
+                     const TreeHistory& history, const std::vector<Point2D>& path,
                      const Pose2D& start, const Pose2D& goal, double scale = 50.0) {
     std::ofstream out(filename);
     if (!out) return false;
@@ -27,11 +27,13 @@ inline bool writeSvg(const std::string& filename, const SearchSpace& space,
         out << obstacle->toSvg(scale, h) << "\n";
     }
 
-    for (const auto& node : tree) {
-        if (node.parent < 0) continue;
-        const Point2D& p = tree[node.parent].point;
-        out << "<line x1=\"" << sx(node.point) << "\" y1=\"" << sy(node.point)
-            << "\" x2=\"" << sx(p) << "\" y2=\"" << sy(p)
+    std::vector<int> parents = history.finalParents();
+    for (size_t i = 0; i < parents.size(); ++i) {
+        if (parents[i] < 0) continue;
+        const Point2D& a = history.points[i];
+        const Point2D& b = history.points[parents[i]];
+        out << "<line x1=\"" << sx(a) << "\" y1=\"" << sy(a)
+            << "\" x2=\"" << sx(b) << "\" y2=\"" << sy(b)
             << "\" stroke=\"red\" stroke-width=\"1\"/>\n";
     }
 
