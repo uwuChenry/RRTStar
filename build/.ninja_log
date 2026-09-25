@@ -1,4 +1,0 @@
-# ninja log v6
-642	742	8119841835733189	my_program.exe	afabd5d37b188c47
-4	642	8119841829352515	CMakeFiles/my_program.dir/src/main.cpp.obj	8d2d580753226be3
-8	497	8119841829382511	CMakeFiles/my_program.dir/src/rrt.cpp.obj	e280ed1e6fcff109
